@@ -3,7 +3,6 @@ Support for Energy consumption Sensors from Circutor via local Web API
 
 Device's website: http://wibeee.circutor.com/
 Documentation: https://github.com/juanjoSanz/hass_wibeee/
-
 """
 
 REQUIREMENTS = ["xmltodict"]
@@ -31,8 +30,8 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
     CONF_RESOURCE,
     CONF_METHOD,
-#    CONF_PHASES)
-    ATTR_ATTRIBUTION
+    # CONF_PHASES,
+    ATTR_ATTRIBUTION,
 )
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.event import async_track_time_interval
@@ -47,44 +46,30 @@ DOMAIN="WIBEEE"
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import Entity
-#from homeassistant.helpers.event import (async_track_state_change, async_track_time_change)
-#from homeassistant.helpers.event import async_track_utc_time_change, async_call_later
-#from homeassistant.util import dt as dt_util
-#from homeassistant.util import Throttle
 
 
-__version__ = '0.0.2'
+__version__ = '0.0.3'
 
 _LOGGER = logging.getLogger(__name__)
-
 
 BASE_URL = 'http://{0}:{1}/{2}'
 PORT=80
 API_PATH = 'en/status.xml'
 
-
 DOMAIN = 'wibeee_energy'
+
 DEFAULT_NAME = 'Wibeee Energy Consumption Sensor'
 DEFAULT_HOST = ''
 DEFAULT_RESOURCE = 'http://{}/en/status.xml'
-#DEFAULT_RESOURCE = 'http://{}:{}/{}'  {hostname} {port} {api_path}
-DEFAULT_SCAN_INTERVAL = 2
-#DEFAULT_SCAN_INTERVAL = 0.5
-DEFAULT_PHASES = 3
-
-
-
+DEFAULT_SCAN_INTERVAL = timedelta(seconds=5)
+#DEFAULT_PHASES = 3
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_HOST, default=DEFAULT_HOST): cv.string,
     vol.Optional(CONF_RESOURCE, default=DEFAULT_RESOURCE): cv.string,
-    vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
-# vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
-#    vol.Optional(CONF_PHASES, default=DEFAULT_PHASES): vol.In([1, 3]),
+    vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.time_period,
+    #vol.Optional(CONF_PHASES, default=DEFAULT_PHASES): vol.In([1, 3]),
 })
-
-#MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=1)
-SCAN_INTERVAL = timedelta(seconds=1)
 
 SENSOR_TYPES = {
     'vrms': ['Vrms', 'V'],
@@ -101,18 +86,13 @@ SENSOR_TYPES = {
 }
 
 
-
-
-
-
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the RESTful sensor."""
     _LOGGER.debug("Setting up Wibeee Sensors...")
 
     sensor_name_suffix = "wibeee"
     host = config.get(CONF_HOST)
-    #scan_interval_sec = config.get(CONF_SCAN_INTERVAL)
-    #SCAN_INTERVAL = timedelta(seconds=scan_interval_sec)
+    scan_interval_sec = config.get(CONF_SCAN_INTERVAL)
     url_api = BASE_URL.format(host, PORT, API_PATH)
 
     # Create a WIBEEE DATA OBJECT
@@ -121,7 +101,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Then make first call and get sensors
     await wibeee_data.set_sensors()
 
-    async_track_time_interval(hass, wibeee_data.fetching_data, SCAN_INTERVAL)
+    async_track_time_interval(hass, wibeee_data.fetching_data, scan_interval_sec)
 
     # Add Entities
     if not wibeee_data.sensors:
@@ -188,24 +168,6 @@ class WibeeeSensor(Entity):
         """Return a unique ID."""
         return #self._unique_id
 
-    # @property
-    # def sensor_phase(self):
-    #     """Return phase"""
-    #     return self._sensor_phase
-    #
-    # async def async_update(self, *_):
-    #     """Update current values."""
-    #     _LOGGER.info("async_update for sensor " + self._entity)
-    #     await self._wibeee_data.fetching_data()
-    #
-    #     if not self._wibeee_data.data:
-    #         # no data, return
-    #         return
-    #
-    #     self._state = self._wibeee_data.data[self._entity]
-
-
-
 
 class WibeeeData(object):
     """Gets the latest data from Wibeee sensors."""
@@ -220,8 +182,6 @@ class WibeeeData(object):
         self.timeout = 10
         self.session = async_get_clientsession(hass)
 
-        #self.sensor_names = ""
-        #self.sensors_keys = None
         self.sensors = None
         self.data = None
 
@@ -248,22 +208,23 @@ class WibeeeData(object):
         tmp_sensors = []
 
         for key,value in self.data.items():
-          try:
-            _LOGGER.debug("Processing sensor [key:%s] [value:%s]", key, value)  
-            sensor_id = key
-            sensor_phase,sensor_name = key.split("_",1)
-            #sensor_phase = sensor_phase.replace("fase4","total")
-            #sensor_phase = sensor_phase.replace("fase","phase")
-            sensor_phase = sensor_phase.replace("fase","")
-            sensor_value = value
-            _LOGGER.debug("Adding entity [phase:%s][sensor:%s][value:%s]", sensor_phase, sensor_id, sensor_value)
-            tmp_sensors.append(WibeeeSensor(self, self.sensor_name_suffix, sensor_id, sensor_phase, sensor_name,sensor_value))
-          except:
-            _LOGGER.error(f"Unable to create WibeeeSensor Entities for key {key} and value {value}")
+            if not "fase1" in key:
+                _LOGGER.error("Ignoring sensor [key:%s]", key)
+                continue
+
+            try:
+                _LOGGER.debug("Processing sensor [key:%s] [value:%s]", key, value)
+                sensor_id = key
+                sensor_phase,sensor_name = key.split("_",1)
+                sensor_phase = sensor_phase.replace("fase","")
+                sensor_value = value
+                _LOGGER.debug("Adding entity [phase:%s][sensor:%s][value:%s]", sensor_phase, sensor_id, sensor_value)
+                tmp_sensors.append(WibeeeSensor(self, self.sensor_name_suffix, sensor_id, sensor_phase, sensor_name,sensor_value))
+            except:
+                _LOGGER.error(f"Unable to create WibeeeSensor Entities for key {key} and value {value}")
 
         # Add sensors
         self.sensors = tmp_sensors
-
 
     #@Throttle(MIN_TIME_BETWEEN_UPDATES)
     async def fetching_data(self, *_):
@@ -287,7 +248,6 @@ class WibeeeData(object):
             return(None)
 
         self.updating_sensors()
-
 
     def updating_sensors(self, *_):
         """Find the current data from self.data."""
